@@ -1,9 +1,28 @@
 #include "updater.hpp"
+#include "CLI11.hpp"
 #include <iostream>
 
-int main ()
+int main (int argc, char **argv)
 {
     using namespace updater;
+
+    CLI::App app{"A updater for GitHub releases", "GRUpdater"};
+
+    app.add_flag_callback("--version", [](){
+        std::cout << "GRUpdater v0.0.1\n";
+        throw CLI::Success{};
+    }, "Print the version (and do nothing else)");
+
+    //TODO: Commands goes here
+
+    try
+    {
+        app.parse(argc, argv);
+    }
+    catch (const CLI::ParseError& e)
+    {
+        return app.exit(e);
+    }
 
     /*RepoContext context;
     context._owner = "JonathSpirit";

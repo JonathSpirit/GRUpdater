@@ -28,6 +28,7 @@ target_compile_options(${PROJECT_NAME} PRIVATE -Wpedantic -Wall -Wextra)
 #Executable
 add_executable(${PROJECT_NAME}Cmd main.cpp)
 target_link_libraries(${PROJECT_NAME}Cmd PRIVATE ${PROJECT_NAME})
+target_include_directories(${PROJECT_NAME}Cmd PRIVATE extern/includes)
 
 if(WIN32)
     set(LINK_LIBRARIES "OpenSSL::SSL;OpenSSL::Crypto;libzip::zip")
