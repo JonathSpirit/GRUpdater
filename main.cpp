@@ -32,11 +32,11 @@ int main (int argc, char **argv)
     app.add_option("--asset", assetPath, "The asset path, if already extracted");
 
     bool verifyTag = true;
-    app.add_option("--verify", verifyTag, "Verify the tag");
+    app.add_flag("--verify", verifyTag, "Verify the tag");
     bool downloadAsset = false;
-    app.add_option("--download", downloadAsset, "Download the asset");
+    app.add_flag("--download", downloadAsset, "Download the asset");
     bool extractAsset = false;
-    app.add_option("--extract", extractAsset, "Extract the asset");
+    app.add_flag("--extract", extractAsset, "Extract the asset");
     bool allowPrerelease = false;
     app.add_flag("--prerelease", allowPrerelease, "Allow prerelease tag");
     bool applyUpdate = false;
@@ -75,6 +75,62 @@ int main (int argc, char **argv)
     //Applying update
     if (applyUpdate)
     {
+        //Get the current json file telling where is all the dynamic files that should not be touched
+        std::vector<std::filesystem::path> dynamicFiles;
+        if (std::filesystem::exists("./dynamicFiles.json"))
+        {
+            std::ifstream dynamicFile("./dynamicFiles.json");
+            try
+            {
+                nlohmann::json dynamicFilesJson = nlohmann::json::parse(dynamicFile);
+                dynamicFile.close();
+
+                for (auto& dynamicFileJson : dynamicFilesJson["files"])
+                {
+                    dynamicFiles.emplace_back(dynamicFileJson.get<std::string>());
+                }
+            }
+            catch (const nlohmann::json::parse_error& e)
+            {
+                dynamicFile.close();
+                std::cerr << "Failed to parse dynamicFiles.json: " << e.what() << '\n';
+            }
+        }
+
+        std::filesystem::path currentPath = "./test/";
+        std::cout << "Current path: " << currentPath << '\n';
+
+        //Remove all files that are not in dynamicFiles and the current executable
+        dynamicFiles.emplace_back(std::filesystem::absolute(argv[0]));
+
+        std::filesystem::recursive_directory_iterator itCurrent(currentPath);
+        for (auto& file : itCurrent)
+        {
+            if (!itCurrent->is_regular_file())
+            {
+                continue;
+            }
+
+            if (std::ranges::find(dynamicFiles, file) == dynamicFiles.end())
+            {
+                //std::filesystem::remove(file);
+                std::cout << "Remove file: " << file << '\n';
+            }
+        }
+
+        //Take all files from the extracted asset and copy them to the current directory
+        std::filesystem::recursive_directory_iterator itAsset(assetPath);
+        for (auto& file : itAsset)
+        {
+            if (!itAsset->is_regular_file())
+            {
+                continue;
+            }
+
+            std::filesystem::create_directories(currentPath / std::filesystem::relative(file.path(), assetPath).parent_path());
+            std::cout << "Copy file: " << file << " to " << currentPath / std::filesystem::relative(file.path(), assetPath) << '\n';
+            std::filesystem::copy(file, currentPath / std::filesystem::relative(file.path(), assetPath));
+        }
 
         return 0;
     }
