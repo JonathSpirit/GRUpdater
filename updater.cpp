@@ -7,6 +7,37 @@
 namespace updater
 {
 
+const char* ToString(TagStatus status)
+{
+    switch (status)
+    {
+    case TagStatus::SameTag:
+        return "SameTag";
+    case TagStatus::NewerTag:
+        return "NewerTag";
+    case TagStatus::OlderTag:
+        return "OlderTag";
+    default:
+        return "Unknown";
+    }
+}
+std::optional<TagStatus> FromString(std::string const& status)
+{
+    if (status == "SameTag")
+    {
+        return TagStatus::SameTag;
+    }
+    if (status == "NewerTag")
+    {
+        return TagStatus::NewerTag;
+    }
+    if (status == "OlderTag")
+    {
+        return TagStatus::OlderTag;
+    }
+    return std::nullopt;
+}
+
 std::optional<Tag> ParseTag(std::string const& tag)
 {
     Tag result{};

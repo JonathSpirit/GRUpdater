@@ -15,6 +15,13 @@
     #endif // _UPDATER_DEF_BUILDDLL
 #endif     //_WIN32
 
+#define GRUPDATER_TAG_MAJOR 0
+#define GRUPDATER_TAG_MINOR 1
+#define GRUPDATER_TAG_PATCH 0
+#define GRUPDATER_STRINGIFY(_x) #_x
+#define GRUPDATER_TAG_STR "v" GRUPDATER_STRINGIFY(GRUPDATER_TAG_MAJOR) "." GRUPDATER_STRINGIFY(GRUPDATER_TAG_MINOR) "." GRUPDATER_STRINGIFY(GRUPDATER_TAG_PATCH)
+#define GRUPDATER_TAG updater::Tag{GRUPDATER_TAG_MAJOR, GRUPDATER_TAG_MINOR, GRUPDATER_TAG_PATCH}
+
 namespace updater
 {
 
@@ -30,6 +37,8 @@ enum class TagStatus
     NewerTag,
     OlderTag
 };
+const char* ToString(TagStatus status);
+std::optional<TagStatus> FromString(std::string const& status);
 struct RepoContext
 {
     std::string _owner;
