@@ -76,4 +76,22 @@ struct RepoContext
 //Called from the caller executable
 [[nodiscard]] UPDATER_API bool RequestApplyUpdate(std::filesystem::path const& rootAssetPath);
 
+/*
+ * MakeAvailable:
+ * Will do the following:
+ * - Retrieve the schedule time
+ * - Verify the schedule time
+ * - Set the schedule time
+ * - Retrieve the context
+ * - Verify the tag
+ * - Download the asset
+ * - Extract the asset
+ * - Return the extracted root
+ */
+[[nodiscard]] UPDATER_API std::optional<std::filesystem::path> MakeAvailable(Tag const& currentTag,
+                                                                             std::string const& owner,
+                                                                             std::string const& repo,
+                                                                             std::filesystem::path const& tempDir,
+                                                                             bool allowPrerelease = false);
+
 }//namespace updater

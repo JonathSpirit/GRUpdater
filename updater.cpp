@@ -574,4 +574,62 @@ bool RequestApplyUpdate(std::filesystem::path const &rootAssetPath)
     return true;
 }
 
+std::optional<std::filesystem::path> MakeAvailable(Tag const& currentTag,
+                                                   std::string const& owner,
+                                                   std::string const& repo,
+                                                   std::filesystem::path const& tempDir,
+                                                   bool allowPrerelease)
+{
+    //Verify schedule time in order to avoid spamming GitHub API requests
+    auto scheduleTime = GetScheduleTime();
+    if (scheduleTime && !VerifyScheduleTime(*scheduleTime))
+    {
+        std::cerr << "Schedule time not reached yet\n";
+        return std::nullopt;
+    }
+    if (!SetScheduleTime())
+    {
+        std::cerr << "Failed to set schedule time (will continue anyway)\n";
+    }
+
+    auto context = RetrieveContext(owner, repo, allowPrerelease);
+    if (!context)
+    {
+        std::cerr << "Failed to retrieve context\n";
+        return std::nullopt;
+    }
+    std::cout << "Context retrieved :\n";
+    std::cout << "\tOwner: " << context->_owner << '\n';
+    std::cout << "\tRepo: " << context->_repo << '\n';
+    std::cout << "\tAsset: " << context->_asset << '\n';
+    std::cout << "\tAsset URL: " << context->_assetUrl << '\n';
+    std::cout << "\tLatest Tag: " << context->_latestTag.major << '.' << context->_latestTag.minor << '.' << context->_latestTag.patch << '\n';
+
+    if (VerifyTag(*context, currentTag) != TagStatus::NewerTag)
+    {
+        std::cerr << "No newer tag available\n";
+        return std::nullopt;
+    }
+    std::cout << "Newer tag available\n";
+
+    auto zipFile = DownloadAsset(*context, tempDir);
+    if (!zipFile)
+    {
+        std::cerr << "Failed to download asset\n";
+        return std::nullopt;
+    }
+
+    std::cout << "Asset downloaded to " << *zipFile << '\n';
+
+    auto extractRoot = ExtractAsset(*zipFile);
+    if (!extractRoot)
+    {
+        std::cerr << "Failed to extract asset\n";
+        return std::nullopt;
+    }
+
+    std::cout << "Asset extracted to " << *extractRoot << '\n';
+    return extractRoot;
+}
+
 }//namespace updater
