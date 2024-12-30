@@ -84,7 +84,7 @@ std::optional<RepoContext> RetrieveContext(std::string const& owner, std::string
         }
 
         nlohmann::json json = nlohmann::json::parse(res->body);
-        if (json.empty() && !json.is_array())
+        if (json.empty() || !json.is_array())
         {
             return std::nullopt;
         }
@@ -381,7 +381,7 @@ std::optional<std::chrono::system_clock::time_point> GetScheduleTime(std::filesy
     try
     {
         nlohmann::json json = nlohmann::json::parse(file);
-        auto scheduleTimePoint = std::chrono::system_clock::from_time_t(json["time"].get<std::time_t>());
+        auto scheduleTimePoint = std::chrono::system_clock::time_point(std::chrono::seconds{json["time"].get<std::chrono::seconds::rep>()});
         file.close();
         return scheduleTimePoint;
     }
@@ -399,7 +399,7 @@ bool SetScheduleTime(std::filesystem::path const &scheduleFile, std::chrono::sys
         return false;
     }
 
-    nlohmann::json scheduleTime = nlohmann::json{{"time", std::chrono::system_clock::to_time_t(time)}};
+    nlohmann::json scheduleTime = nlohmann::json{{"time", std::chrono::duration_cast<std::chrono::seconds>(time.time_since_epoch()).count()}};
     std::ofstream file(scheduleFile);
     if (!file.is_open())
     {

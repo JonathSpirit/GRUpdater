@@ -51,7 +51,8 @@ int main (int argc, char **argv)
         auto scheduleTime = GetScheduleTime();
         if (scheduleTime && !VerifyScheduleTime(*scheduleTime))
         {
-            std::cerr << "Schedule time not reached yet\n";
+            std::cerr << "Schedule time not reached yet, remaining "
+                      << GRUPDATER_DEFAULT_SCHEDULE_DELAY_HOURS * 60 - std::chrono::duration_cast<std::chrono::minutes>(std::chrono::system_clock::now() - *scheduleTime).count() << " minutes\n";
             throw CLI::RuntimeError{1};
         }
         if (!SetScheduleTime())
