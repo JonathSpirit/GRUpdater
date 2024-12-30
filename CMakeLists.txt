@@ -16,7 +16,7 @@ set(CMAKE_RELEASE_POSTFIX "")
 #Library
 add_library(${PROJECT_NAME} SHARED)
 target_sources(${PROJECT_NAME} PRIVATE updater.cpp)
-target_sources(${PROJECT_NAME} PUBLIC updater.hpp)
+target_sources(${PROJECT_NAME} PUBLIC FILE_SET HEADERS FILES updater.hpp)
 
 target_compile_definitions(${PROJECT_NAME} PRIVATE _UPDATER_DEF_BUILDDLL)
 target_link_libraries(${PROJECT_NAME} PRIVATE user32 ws2_32 winmm crypt32)
