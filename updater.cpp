@@ -579,7 +579,10 @@ bool ApplyUpdate(std::filesystem::path const &target, std::filesystem::path call
         STARTUPINFOW si{};
         si.cb = sizeof(si);
         PROCESS_INFORMATION pi{};
-        if (!CreateProcessW(callerExecutableW.c_str(), nullptr, nullptr, nullptr, FALSE, CREATE_NEW_PROCESS_GROUP, nullptr, nullptr, &si, &pi))
+        if (!CreateProcessW(callerExecutableW.c_str(), nullptr,
+            nullptr, nullptr, FALSE,
+            CREATE_NEW_PROCESS_GROUP, nullptr,
+            callerExecutable.parent_path().wstring().c_str(), &si, &pi))
         {
             std::cerr << "Failed to create process\n";
             return true; //Return true because the update was successful
@@ -619,7 +622,10 @@ bool RequestApplyUpdate(std::filesystem::path const &rootAssetPath, std::filesys
     STARTUPINFOW si{};
     si.cb = sizeof(si);
     PROCESS_INFORMATION pi{};
-    if (!CreateProcessW(updaterPathW.c_str(), commandLine.data(), nullptr, nullptr, FALSE, CREATE_NEW_PROCESS_GROUP, nullptr, nullptr, &si, &pi))
+    if (!CreateProcessW(updaterPathW.c_str(), commandLine.data(),
+        nullptr, nullptr, FALSE,
+        CREATE_NEW_PROCESS_GROUP, nullptr,
+        rootAssetPath.wstring().c_str(), &si, &pi))
     {
         std::cerr << "Failed to create process\n";
         return false;
