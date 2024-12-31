@@ -479,6 +479,7 @@ bool ApplyUpdate(std::filesystem::path const &target, std::filesystem::path call
         return false;
     }
 
+    std::cout << "Current directory: " << std::filesystem::current_path() << '\n';
     std::cout << "Applying update to " << target << '\n';
 
     //GRUpdater executable (from the caller side) should be in the same directory as the target
@@ -573,7 +574,13 @@ bool ApplyUpdate(std::filesystem::path const &target, std::filesystem::path call
 
     if (!callerExecutable.empty())
     {
-        std::cout << "Caller executable: " << callerExecutable << '\n';
+        //TODO: This doesn't work with a weird current directory behavior.
+        // The caller executable is called but with the directory of the updater
+
+        std::cout << "Successfully applied update, you can now restart the application !\n";
+        std::cin.get();
+
+        /*std::cout << "Caller executable: " << callerExecutable << '\n';
         //Launch the caller executable
         std::wstring callerExecutableW = callerExecutable.wstring();
         STARTUPINFOW si{};
@@ -588,7 +595,7 @@ bool ApplyUpdate(std::filesystem::path const &target, std::filesystem::path call
             return true; //Return true because the update was successful
         }
         CloseHandle(pi.hProcess);
-        CloseHandle(pi.hThread);
+        CloseHandle(pi.hThread);*/
     }
 
     return true;
@@ -619,6 +626,10 @@ bool RequestApplyUpdate(std::filesystem::path const &rootAssetPath, std::filesys
             + std::filesystem::current_path().wstring()
             + L" --pid " + std::to_wstring(callerPid)
             + L" --caller " + callerExecutable.wstring();
+
+    std::wcout << "Command line: " << commandLine << '\n';
+    std::wcout << "Updater path: " << updaterPathW << '\n';
+
     STARTUPINFOW si{};
     si.cb = sizeof(si);
     PROCESS_INFORMATION pi{};
