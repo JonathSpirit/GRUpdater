@@ -134,8 +134,12 @@ int main (int argc, char **argv)
         ->required()
         ->check(CLI::PositiveNumber);
 
+    std::filesystem::path callerExecutable;
+    subcommandApply->add_option("--caller", callerExecutable, "The caller executable path")
+        ->check(CLI::ExistingFile);
+
     subcommandApply->callback([&] {
-        if (!ApplyUpdate(targetDir, callerPid==0 ? std::nullopt : std::optional{callerPid}))
+        if (!ApplyUpdate(targetDir, callerExecutable, callerPid==0 ? std::nullopt : std::optional{callerPid}))
         {
             std::cerr << "Failed to apply update\n";
             throw CLI::RuntimeError{1};

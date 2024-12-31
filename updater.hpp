@@ -30,6 +30,7 @@
 #define GRUPDATER_WAIT_PID_TIMEOUT_MS 5000
 
 #define GRUPDATER_EXECUTABLE_NAME "GRUpdaterCmd.exe"
+#define GRUPDATER_EXECUTABLE_NAME_W L"GRUpdaterCmd.exe"
 
 #define GRUPDATER_DEFAULT_DYNAMIC_FILE "./dynamicFiles.json"
 
@@ -72,9 +73,9 @@ struct RepoContext
 [[nodiscard]] UPDATER_API bool VerifyScheduleTime(std::chrono::system_clock::time_point const& timePoint, std::chrono::hours const& delay = std::chrono::hours{GRUPDATER_DEFAULT_SCHEDULE_DELAY_HOURS});
 
 //Called from the extracted GRUpdater executable
-[[nodiscard]] UPDATER_API bool ApplyUpdate(std::filesystem::path const& target, std::optional<uint32_t> callerPid);
+[[nodiscard]] UPDATER_API bool ApplyUpdate(std::filesystem::path const& target, std::filesystem::path callerExecutable, std::optional<uint32_t> callerPid);
 //Called from the caller executable
-[[nodiscard]] UPDATER_API bool RequestApplyUpdate(std::filesystem::path const& rootAssetPath);
+[[nodiscard]] UPDATER_API bool RequestApplyUpdate(std::filesystem::path const& rootAssetPath, std::filesystem::path const& callerExecutable);
 
 /*
  * MakeAvailable:

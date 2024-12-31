@@ -273,8 +273,8 @@ std::optional<std::filesystem::path> ExtractAsset(std::filesystem::path const& a
         return std::nullopt;
     }
 
-    bool isRootPathValid = false;
-    std::filesystem::path extractRootPath{};
+    bool extractedFilesHaveRoot = true;
+    std::filesystem::path rootPath{};
 
     for (zip_int64_t i = 0; i < zip_get_num_entries(zip, 0); ++i)
     {
@@ -292,16 +292,20 @@ std::optional<std::filesystem::path> ExtractAsset(std::filesystem::path const& a
         std::cout << "Size: ["<< zipStat.size <<"], ";
         std::cout << "mtime: ["<< zipStat.mtime <<"]\n";
 
-        if (extractFilePath.begin() != extractFilePath.end() && *extractFilePath.begin() != extractRootPath)
+        if (extractFilePath.begin() != extractFilePath.end() && extractedFilesHaveRoot)
         {
-            if (extractRootPath.empty())
-            {
-                extractRootPath = *extractFilePath.begin();
-                isRootPathValid = true;
+            if (extractFilePath.begin()->has_filename())
+            {//File inside the root so there is no root directory
+                extractedFilesHaveRoot = false;
             }
-            else if (!isRootPathValid)
+
+            if (rootPath.empty())
             {
-                isRootPathValid = false; //Must be unique
+                rootPath = *extractFilePath.begin();
+            }
+            else if (rootPath != *extractFilePath.begin())
+            {
+                extractedFilesHaveRoot = false;
             }
         }
 
@@ -356,13 +360,18 @@ std::optional<std::filesystem::path> ExtractAsset(std::filesystem::path const& a
         zip_fclose(zipFile);
     }
 
+    if (extractedFilesHaveRoot && rootPath.empty())
+    {
+        extractedFilesHaveRoot = false;
+    }
+
     zip_close(zip);
 
-    if (!isRootPathValid)
+    if (!extractedFilesHaveRoot)
     {
         return assetPath.parent_path();
     }
-    return assetPath.parent_path() / extractRootPath;
+    return assetPath.parent_path() / rootPath;
 }
 
 std::optional<std::chrono::system_clock::time_point> GetScheduleTime(std::filesystem::path const &scheduleFile)
@@ -416,7 +425,7 @@ bool VerifyScheduleTime(std::chrono::system_clock::time_point const &timePoint, 
     return std::chrono::duration_cast<std::chrono::hours>(now - timePoint).count() >= delay.count();
 }
 
-bool ApplyUpdate(std::filesystem::path const &target, std::optional<uint32_t> callerPid)
+bool ApplyUpdate(std::filesystem::path const &target, std::filesystem::path callerExecutable, std::optional<uint32_t> callerPid)
 {
     //Wait for the caller to close
     if (callerPid)
@@ -452,6 +461,8 @@ bool ApplyUpdate(std::filesystem::path const &target, std::optional<uint32_t> ca
         return false;
     }
 
+    std::cout << "Applying update to " << target << '\n';
+
     //GRUpdater executable (from the caller side) should be in the same directory as the target
     auto updaterPath = target / GRUPDATER_EXECUTABLE_NAME;
     if (!std::filesystem::exists(updaterPath) || !std::filesystem::is_regular_file(updaterPath))
@@ -468,6 +479,8 @@ bool ApplyUpdate(std::filesystem::path const &target, std::optional<uint32_t> ca
         return false;
     }
     temporaryPath = *temporaryPath.begin();
+
+    std::cout << "Temporary path: " << temporaryPath << '\n';
 
     //Get the current json file telling where is all the dynamic files that should not be touched
     std::vector<std::filesystem::path> dynamicFiles;
@@ -508,7 +521,7 @@ bool ApplyUpdate(std::filesystem::path const &target, std::optional<uint32_t> ca
             continue;
         }
 
-        if (*file.path().begin() == temporaryPath)
+        if (*std::filesystem::relative(file.path(), target).begin() == temporaryPath)
         {
             continue;
         }
@@ -536,10 +549,27 @@ bool ApplyUpdate(std::filesystem::path const &target, std::optional<uint32_t> ca
         std::filesystem::copy(file, resultFilePath);
     }
 
+    if (!callerExecutable.empty())
+    {
+        std::cout << "Caller executable: " << callerExecutable << '\n';
+        //Launch the caller executable
+        std::wstring callerExecutableW = callerExecutable.wstring();
+        STARTUPINFOW si{};
+        si.cb = sizeof(si);
+        PROCESS_INFORMATION pi{};
+        if (!CreateProcessW(callerExecutableW.c_str(), nullptr, nullptr, nullptr, FALSE, CREATE_NEW_PROCESS_GROUP, nullptr, nullptr, &si, &pi))
+        {
+            std::cerr << "Failed to create process\n";
+            return true; //Return true because the update was successful
+        }
+        CloseHandle(pi.hProcess);
+        CloseHandle(pi.hThread);
+    }
+
     return true;
 }
 
-bool RequestApplyUpdate(std::filesystem::path const &rootAssetPath)
+bool RequestApplyUpdate(std::filesystem::path const &rootAssetPath, std::filesystem::path const& callerExecutable)
 {
     if (rootAssetPath.empty() || !std::filesystem::exists(rootAssetPath) || !std::filesystem::is_directory(rootAssetPath))
     {
@@ -560,7 +590,10 @@ bool RequestApplyUpdate(std::filesystem::path const &rootAssetPath)
 
     //Launch the updater executable
     std::wstring updaterPathW = updaterPath.wstring();
-    std::wstring commandLine = L"apply --target " + std::filesystem::current_path().wstring() + L" --pid " + std::to_wstring(callerPid);
+    std::wstring commandLine = GRUPDATER_EXECUTABLE_NAME_W L" apply --target "
+            + std::filesystem::current_path().wstring()
+            + L" --pid " + std::to_wstring(callerPid)
+            + L" --caller " + callerExecutable.wstring();
     STARTUPINFOW si{};
     si.cb = sizeof(si);
     PROCESS_INFORMATION pi{};
