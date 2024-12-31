@@ -15,6 +15,24 @@
 namespace updater
 {
 
+namespace
+{
+
+bool IsSubDirectory(std::filesystem::path p, std::filesystem::path const& root)
+{
+    while(!p.empty())
+    {
+        if (p == root)
+        {
+            return true;
+        }
+        p = p.parent_path();
+    }
+    return false;
+}
+
+}
+
 const char* ToString(TagStatus status)
 {
     switch (status)
@@ -294,7 +312,7 @@ std::optional<std::filesystem::path> ExtractAsset(std::filesystem::path const& a
 
         if (extractFilePath.begin() != extractFilePath.end() && extractedFilesHaveRoot)
         {
-            if (extractFilePath.begin()->has_filename())
+            if (!extractFilePath.has_parent_path() && extractFilePath.has_filename())
             {//File inside the root so there is no root directory
                 extractedFilesHaveRoot = false;
             }
@@ -478,9 +496,13 @@ bool ApplyUpdate(std::filesystem::path const &target, std::filesystem::path call
         std::cerr << "Failed to get temporary path\n";
         return false;
     }
-    temporaryPath = *temporaryPath.begin();
 
     std::cout << "Temporary path: " << temporaryPath << '\n';
+
+    if (temporaryPath.has_parent_path())
+    {
+        temporaryPath = temporaryPath.parent_path();
+    }
 
     //Get the current json file telling where is all the dynamic files that should not be touched
     std::vector<std::filesystem::path> dynamicFiles;
@@ -521,7 +543,7 @@ bool ApplyUpdate(std::filesystem::path const &target, std::filesystem::path call
             continue;
         }
 
-        if (*std::filesystem::relative(file.path(), target).begin() == temporaryPath)
+        if (IsSubDirectory(std::filesystem::relative(file.path(), target), temporaryPath))
         {
             continue;
         }
