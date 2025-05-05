@@ -1,6 +1,7 @@
 #include "updater.hpp"
 #include "CLI11.hpp"
 #include <iostream>
+#include <bits/this_thread_sleep.h>
 
 int main (int argc, char **argv)
 {
@@ -145,6 +146,29 @@ int main (int argc, char **argv)
             throw CLI::RuntimeError{1};
         }
         throw CLI::Success{};
+    });
+
+    auto subcommandRequestApply = app.add_subcommand("requestApply", "Request the update (from the GRUpdater of the caller executable)");
+
+    std::filesystem::path rootAssetPath;
+    subcommandRequestApply->add_option("-r,--root", rootAssetPath, "The root asset path (absolute path)")
+        ->required()
+        ->check(CLI::ExistingDirectory);
+
+    subcommandRequestApply->add_option("--caller", callerExecutable, "The caller executable path")
+        ->required()
+        ->check(CLI::ExistingFile);
+
+    subcommandRequestApply->callback([&] {
+        if (RequestApplyUpdate(rootAssetPath, callerExecutable))
+        {
+            std::cout << "Request to apply update sent\n";
+            std::cout << "This process will now close in order to apply it from the called GRUpdater\n";
+            std::this_thread::sleep_for(std::chrono::seconds{2});
+            throw CLI::Success{};
+        }
+        std::cerr << "Failed to call RequestApplyUpdate()\n";
+        throw CLI::RuntimeError{1};
     });
 
     CLI11_PARSE(app, argc, argv);
