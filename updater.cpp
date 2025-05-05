@@ -78,7 +78,7 @@ std::optional<Tag> ParseTag(std::string const& tag)
     return std::nullopt;
 }
 
-std::optional<RepoContext> RetrieveContext(std::string const& owner, std::string const& repo, bool allowPrerelease)
+std::optional<RepoContext> RetrieveContext(std::string const& owner, std::string const& repo, [[maybe_unused]] bool allowPrerelease)
 {
     using namespace httplib;
 
@@ -87,6 +87,15 @@ std::optional<RepoContext> RetrieveContext(std::string const& owner, std::string
         return std::nullopt;
     }
 
+#ifdef _UPDATER_DEF_DUMMYTEST
+    RepoContext context;
+    context._owner = owner;
+    context._repo = repo;
+    context._asset = "dummy.zip";
+    context._assetUrl = "dummy.zip";
+    context._latestTag = { 2, 0, 0 };
+    return context;
+#else
     Client cli("https://api.github.com");
 
     Headers headers = {
@@ -172,6 +181,7 @@ std::optional<RepoContext> RetrieveContext(std::string const& owner, std::string
         }
     }
     return std::nullopt;
+#endif // _UPDATER_DEF_DUMMYTEST
 }
 TagStatus VerifyTag(RepoContext const& context, Tag const& currentTag)
 {
@@ -221,7 +231,7 @@ std::optional<std::filesystem::path> DownloadAsset(RepoContext const& context, s
     auto fullPath = std::filesystem::absolute(tempDir);
     auto relativePath = std::filesystem::relative(fullPath, currentPath) / "";
 
-    if (relativePath != tempDir || currentPath == fullPath)
+    if (relativePath.lexically_normal() != tempDir.lexically_normal() || currentPath == fullPath)
     {
         return std::nullopt;
     }
@@ -247,6 +257,13 @@ std::optional<std::filesystem::path> DownloadAsset(RepoContext const& context, s
         }
     }
 
+#ifdef _UPDATER_DEF_DUMMYTEST
+    std::filesystem::path assetPath = tempDir / context._asset;
+    std::ofstream file(assetPath, std::ios::binary);
+    file << "Dummy data";
+    file.close();
+    return assetPath;
+#else
     Client cli("https://github.com");
     cli.set_follow_location(true);
 
@@ -264,6 +281,7 @@ std::optional<std::filesystem::path> DownloadAsset(RepoContext const& context, s
         return assetPath;
     }
     return std::nullopt;
+#endif // _UPDATER_DEF_DUMMYTEST
 }
 std::optional<std::filesystem::path> ExtractAsset(std::filesystem::path const& assetPath)
 {
@@ -276,6 +294,29 @@ std::optional<std::filesystem::path> ExtractAsset(std::filesystem::path const& a
         return std::nullopt;
     }
 
+#ifdef _UPDATER_DEF_DUMMYTEST
+    std::filesystem::path extractPath = assetPath.parent_path() / "dummy";
+    if (!std::filesystem::exists(extractPath))
+    {
+        std::filesystem::create_directories(extractPath);
+    }
+    else if (!std::filesystem::is_directory(extractPath))
+    {
+        return std::nullopt;
+    }
+
+    std::ofstream file(extractPath / "dummy.txt");
+    file << "Dummy data";
+    file.close();
+
+    //Copy exe and dll files
+    auto currentPath = std::filesystem::current_path() / GRUPDATER_EXECUTABLE_NAME_W;
+    std::filesystem::copy_file(currentPath, extractPath / GRUPDATER_EXECUTABLE_NAME_W, std::filesystem::copy_options::overwrite_existing);
+    currentPath = std::filesystem::current_path() / GRUPDATER_DLL_NAME_W;
+    std::filesystem::copy_file(currentPath, extractPath / GRUPDATER_DLL_NAME_W, std::filesystem::copy_options::overwrite_existing);
+
+    return extractPath;
+#else
     auto parentPath = assetPath.parent_path();
 
     int err;
@@ -390,6 +431,7 @@ std::optional<std::filesystem::path> ExtractAsset(std::filesystem::path const& a
         return assetPath.parent_path();
     }
     return assetPath.parent_path() / rootPath;
+#endif // _UPDATER_DEF_DUMMYTEST
 }
 
 std::optional<std::chrono::system_clock::time_point> GetScheduleTime(std::filesystem::path const &scheduleFile)
@@ -574,13 +616,10 @@ bool ApplyUpdate(std::filesystem::path const &target, std::filesystem::path call
 
     if (!callerExecutable.empty())
     {
-        //TODO: This doesn't work with a weird current directory behavior.
-        // The caller executable is called but with the directory of the updater
-
         std::cout << "Successfully applied update, you can now restart the application !\n";
-        std::cin.get();
+        std::this_thread::sleep_for(std::chrono::seconds{2});
 
-        /*std::cout << "Caller executable: " << callerExecutable << '\n';
+        std::cout << "Caller executable: " << callerExecutable << '\n';
         //Launch the caller executable
         std::wstring callerExecutableW = callerExecutable.wstring();
         STARTUPINFOW si{};
@@ -588,14 +627,14 @@ bool ApplyUpdate(std::filesystem::path const &target, std::filesystem::path call
         PROCESS_INFORMATION pi{};
         if (!CreateProcessW(callerExecutableW.c_str(), nullptr,
             nullptr, nullptr, FALSE,
-            CREATE_NEW_PROCESS_GROUP, nullptr,
+            CREATE_NEW_PROCESS_GROUP | DETACHED_PROCESS, nullptr,
             callerExecutable.parent_path().wstring().c_str(), &si, &pi))
         {
             std::cerr << "Failed to create process\n";
             return true; //Return true because the update was successful
         }
         CloseHandle(pi.hProcess);
-        CloseHandle(pi.hThread);*/
+        CloseHandle(pi.hThread);
     }
 
     return true;
@@ -622,10 +661,10 @@ bool RequestApplyUpdate(std::filesystem::path const &rootAssetPath, std::filesys
 
     //Launch the updater executable
     std::wstring updaterPathW = updaterPath.wstring();
-    std::wstring commandLine = GRUPDATER_EXECUTABLE_NAME_W L" apply --target "
+    std::wstring commandLine = GRUPDATER_EXECUTABLE_NAME_W L" apply --target \""
             + std::filesystem::current_path().wstring()
-            + L" --pid " + std::to_wstring(callerPid)
-            + L" --caller " + callerExecutable.wstring();
+            + L"\" --pid " + std::to_wstring(callerPid)
+            + L" --caller \"" + callerExecutable.wstring() + L'\"';
 
     std::wcout << "Command line: " << commandLine << '\n';
     std::wcout << "Updater path: " << updaterPathW << '\n';
@@ -635,7 +674,7 @@ bool RequestApplyUpdate(std::filesystem::path const &rootAssetPath, std::filesys
     PROCESS_INFORMATION pi{};
     if (!CreateProcessW(updaterPathW.c_str(), commandLine.data(),
         nullptr, nullptr, FALSE,
-        CREATE_NEW_PROCESS_GROUP, nullptr,
+        CREATE_NEW_PROCESS_GROUP | CREATE_NEW_CONSOLE, nullptr,
         rootAssetPath.wstring().c_str(), &si, &pi))
     {
         std::cerr << "Failed to create process\n";

@@ -13,6 +13,9 @@ find_package(libzip REQUIRED)
 set(CMAKE_DEBUG_POSTFIX "_d")
 set(CMAKE_RELEASE_POSTFIX "")
 
+#Options
+option(UPDATER_DUMMY_TEST "The update will create a dummy folder instead of a real app env (debug only)" OFF)
+
 #Library
 add_library(${PROJECT_NAME} SHARED)
 target_sources(${PROJECT_NAME} PRIVATE updater.cpp)
@@ -30,6 +33,10 @@ target_compile_options(${PROJECT_NAME} PRIVATE -Wpedantic -Wall -Wextra)
 add_executable(${PROJECT_NAME}Cmd main.cpp)
 target_link_libraries(${PROJECT_NAME}Cmd PRIVATE ${PROJECT_NAME})
 target_include_directories(${PROJECT_NAME}Cmd PRIVATE extern/includes)
+
+if (UPDATER_DUMMY_TEST)
+    target_compile_definitions(${PROJECT_NAME} PUBLIC _UPDATER_DEF_DUMMYTEST)
+endif()
 
 if(WIN32)
     set(LINK_LIBRARIES "OpenSSL::SSL;OpenSSL::Crypto;libzip::zip")

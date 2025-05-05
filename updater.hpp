@@ -31,6 +31,8 @@
 
 #define GRUPDATER_EXECUTABLE_NAME "GRUpdaterCmd.exe"
 #define GRUPDATER_EXECUTABLE_NAME_W L"GRUpdaterCmd.exe"
+#define GRUPDATER_DLL_NAME "libGRUpdater_d.dll"
+#define GRUPDATER_DLL_NAME_W L"libGRUpdater_d.dll"
 
 #define GRUPDATER_DEFAULT_DYNAMIC_FILE "./dynamicFiles.json"
 
