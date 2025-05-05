@@ -18,7 +18,7 @@ option(UPDATER_DUMMY_TEST "The update will create a dummy folder instead of a re
 
 #Library
 add_library(${PROJECT_NAME} SHARED)
-target_sources(${PROJECT_NAME} PRIVATE updater.cpp)
+target_sources(${PROJECT_NAME} PRIVATE updater.cpp infodll.rc)
 target_sources(${PROJECT_NAME} PUBLIC FILE_SET HEADERS FILES updater.hpp)
 
 target_compile_definitions(${PROJECT_NAME} PRIVATE _UPDATER_DEF_BUILDDLL)
@@ -30,7 +30,7 @@ target_include_directories(${PROJECT_NAME} PRIVATE extern/includes)
 target_compile_options(${PROJECT_NAME} PRIVATE -Wpedantic -Wall -Wextra)
 
 #Executable
-add_executable(${PROJECT_NAME}Cmd main.cpp)
+add_executable(${PROJECT_NAME}Cmd main.cpp infoexe.rc)
 target_link_libraries(${PROJECT_NAME}Cmd PRIVATE ${PROJECT_NAME})
 target_include_directories(${PROJECT_NAME}Cmd PRIVATE extern/includes)
 
