@@ -123,51 +123,26 @@ int main (int argc, char **argv)
         throw CLI::Success{};
     });
 
-    auto subcommandApply = app.add_subcommand("apply", "Apply the update (from the GRUpdater of the extracted assets)");
+    auto subcommandApply = app.add_subcommand("apply", "Apply the update");
 
-    std::filesystem::path targetDir;
-    subcommandApply->add_option("-t,--target", targetDir, "The target directory (absolute path)")
+    std::filesystem::path rootAssetPath;
+    subcommandApply->add_option("-r,--root", rootAssetPath, "The root asset path (absolute path)")
         ->required()
         ->check(CLI::ExistingDirectory);
 
-    uint32_t callerPid;
-    subcommandApply->add_option("--pid", callerPid, "The caller process id")
-        ->required()
-        ->check(CLI::PositiveNumber);
-
-    std::filesystem::path callerExecutable;
     subcommandApply->add_option("--caller", callerExecutable, "The caller executable path")
+        ->required()
         ->check(CLI::ExistingFile);
 
     subcommandApply->callback([&] {
-        if (!ApplyUpdate(targetDir, callerExecutable, callerPid==0 ? std::nullopt : std::optional{callerPid}))
-        {
-            std::cerr << "Failed to apply update\n";
-            throw CLI::RuntimeError{1};
-        }
-        throw CLI::Success{};
-    });
-
-    auto subcommandRequestApply = app.add_subcommand("requestApply", "Request the update (from the GRUpdater of the caller executable)");
-
-    std::filesystem::path rootAssetPath;
-    subcommandRequestApply->add_option("-r,--root", rootAssetPath, "The root asset path (absolute path)")
-        ->required()
-        ->check(CLI::ExistingDirectory);
-
-    subcommandRequestApply->add_option("--caller", callerExecutable, "The caller executable path")
-        ->required()
-        ->check(CLI::ExistingFile);
-
-    subcommandRequestApply->callback([&] {
-        if (RequestApplyUpdate(rootAssetPath, callerExecutable))
+        if (ApplyUpdate(rootAssetPath, callerExecutable))
         {
             std::cout << "Request to apply update sent\n";
-            std::cout << "This process will now close in order to apply it from the called GRUpdater\n";
+            std::cout << "This process will now close in order to apply it\n";
             std::this_thread::sleep_for(std::chrono::seconds{2});
             throw CLI::Success{};
         }
-        std::cerr << "Failed to call RequestApplyUpdate()\n";
+        std::cerr << "Failed to call ApplyUpdate()\n";
         throw CLI::RuntimeError{1};
     });
 

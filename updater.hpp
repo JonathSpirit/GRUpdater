@@ -74,10 +74,8 @@ struct RepoContext
 [[nodiscard]] UPDATER_API bool SetScheduleTime(std::filesystem::path const& scheduleFile = GRUPDATER_DEFAULT_SCHEDULE_FILE, std::chrono::system_clock::time_point const& time = std::chrono::system_clock::now());
 [[nodiscard]] UPDATER_API bool VerifyScheduleTime(std::chrono::system_clock::time_point const& timePoint, std::chrono::hours const& delay = std::chrono::hours{GRUPDATER_DEFAULT_SCHEDULE_DELAY_HOURS});
 
-//Called from the extracted GRUpdater executable
-[[nodiscard]] UPDATER_API bool ApplyUpdate(std::filesystem::path const& target, std::filesystem::path callerExecutable, std::optional<uint32_t> callerPid);
 //Called from the caller executable
-[[nodiscard]] UPDATER_API bool RequestApplyUpdate(std::filesystem::path const& rootAssetPath, std::filesystem::path const& callerExecutable);
+[[nodiscard]] UPDATER_API bool ApplyUpdate(std::filesystem::path const& rootAssetPath, std::filesystem::path const& callerExecutable);
 
 /*
  * MakeAvailable:
