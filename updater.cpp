@@ -3,6 +3,7 @@
 #include "json.hpp"
 #include "updater.hpp"
 #include <zip.h>
+#include <fstream>
 
 #ifndef WIN32_LEAN_AND_MEAN
     #define WIN32_LEAN_AND_MEAN
