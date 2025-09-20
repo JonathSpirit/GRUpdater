@@ -5,13 +5,21 @@
 #include <zip.h>
 #include <fstream>
 
-#ifndef WIN32_LEAN_AND_MEAN
-    #define WIN32_LEAN_AND_MEAN
+#ifdef _WIN32
+    #ifndef WIN32_LEAN_AND_MEAN
+        #define WIN32_LEAN_AND_MEAN
+    #endif
+    #ifndef NOMINMAX
+        #define NOMINMAX
+    #endif
+    #include <windows.h>
+#else
+    #include <unistd.h>
+    #include <sys/wait.h>
+    #include <signal.h>
+    #include <sys/types.h>
+    #include <cstring>
 #endif
-#ifndef NOMINMAX
-    #define NOMINMAX
-#endif
-#include <windows.h>
 
 namespace updater
 {
@@ -144,10 +152,17 @@ std::optional<RepoContext> RetrieveContext(std::string const& owner, std::string
             std::string asset_name_lower = asset_name;
             std::ranges::transform(asset_name_lower, asset_name_lower.begin(), ::tolower);
 
+#ifdef _WIN32
             if (asset_name_lower.find("windows") == std::string::npos)
             {
                 continue;
             }
+#else
+            if (asset_name_lower.find("linux") == std::string::npos)
+            {
+                continue;
+            }
+#endif
 
             if constexpr (sizeof(void*) == 8)
             {
@@ -491,6 +506,7 @@ bool ApplyUpdate(std::filesystem::path const &target, std::filesystem::path call
     //Wait for the caller to close
     if (callerPid)
     {
+#ifdef _WIN32
         //Get handle
         HANDLE hProcess = OpenProcess(SYNCHRONIZE, FALSE, *callerPid);
         if (hProcess != nullptr)
@@ -509,6 +525,35 @@ bool ApplyUpdate(std::filesystem::path const &target, std::filesystem::path call
         {
             std::cout << "Failed to open process " << *callerPid << '\n';
         }
+#else
+        //On Linux, wait for the process to finish
+        std::cout << "Waiting for process " << *callerPid << " to finish\n";
+        
+        // Check if the process is still running and wait for it to finish
+        int timeout_ms = GRUPDATER_WAIT_PID_TIMEOUT_MS;
+        int waited_ms = 0;
+        const int poll_interval_ms = 100;
+        
+        while (waited_ms < timeout_ms)
+        {
+            // Check if process still exists by sending signal 0
+            if (kill(*callerPid, 0) == -1 && errno == ESRCH)
+            {
+                // Process doesn't exist anymore
+                break;
+            }
+            
+            // Wait a bit more
+            usleep(poll_interval_ms * 1000);
+            waited_ms += poll_interval_ms;
+        }
+        
+        if (waited_ms >= timeout_ms && kill(*callerPid, 0) == 0)
+        {
+            std::cerr << "Process " << *callerPid << " still running after timeout\n";
+            return false;
+        }
+#endif
     }
 
     if (!target.is_absolute())
@@ -622,6 +667,7 @@ bool ApplyUpdate(std::filesystem::path const &target, std::filesystem::path call
 
         std::cout << "Caller executable: " << callerExecutable << '\n';
         //Launch the caller executable
+#ifdef _WIN32
         std::wstring callerExecutableW = callerExecutable.wstring();
         STARTUPINFOW si{};
         si.cb = sizeof(si);
@@ -636,6 +682,35 @@ bool ApplyUpdate(std::filesystem::path const &target, std::filesystem::path call
         }
         CloseHandle(pi.hProcess);
         CloseHandle(pi.hThread);
+#else
+        pid_t pid = fork();
+        if (pid == 0)
+        {
+            // Child process - exec the caller executable
+            std::string callerPath = callerExecutable.string();
+            std::string workingDir = callerExecutable.parent_path().string();
+            
+            // Change to the working directory
+            if (chdir(workingDir.c_str()) != 0)
+            {
+                std::cerr << "Failed to change directory to " << workingDir << '\n';
+                _exit(1);
+            }
+            
+            // Execute the caller
+            execl(callerPath.c_str(), callerPath.c_str(), (char*)nullptr);
+            
+            // If we get here, exec failed
+            std::cerr << "Failed to exec process: " << callerPath << '\n';
+            _exit(1);
+        }
+        else if (pid < 0)
+        {
+            std::cerr << "Failed to fork process\n";
+            return true; //Return true because the update was successful
+        }
+        // Parent process continues
+#endif
     }
 
     return true;
@@ -658,9 +733,14 @@ bool RequestApplyUpdate(std::filesystem::path const &rootAssetPath, std::filesys
     }
 
     //Get the caller process id
+#ifdef _WIN32
     auto callerPid = GetCurrentProcessId();
+#else
+    auto callerPid = getpid();
+#endif
 
     //Launch the updater executable
+#ifdef _WIN32
     std::wstring updaterPathW = updaterPath.wstring();
     std::wstring commandLine = GRUPDATER_EXECUTABLE_NAME_W L" apply --target \""
             + std::filesystem::current_path().wstring()
@@ -683,6 +763,43 @@ bool RequestApplyUpdate(std::filesystem::path const &rootAssetPath, std::filesys
     }
     CloseHandle(pi.hProcess);
     CloseHandle(pi.hThread);
+#else
+    std::string updaterPathStr = updaterPath.string();
+    std::string targetPath = std::filesystem::current_path().string();
+    std::string pidStr = std::to_string(callerPid);
+    std::string callerPath = callerExecutable.string();
+    
+    std::cout << "Command: " << updaterPathStr << " apply --target \"" << targetPath 
+              << "\" --pid " << pidStr << " --caller \"" << callerPath << "\"\n";
+    std::cout << "Working directory: " << rootAssetPath << '\n';
+
+    pid_t pid = fork();
+    if (pid == 0)
+    {
+        // Child process - exec the updater
+        if (chdir(rootAssetPath.string().c_str()) != 0)
+        {
+            std::cerr << "Failed to change directory to " << rootAssetPath << '\n';
+            _exit(1);
+        }
+        
+        execl(updaterPathStr.c_str(), updaterPathStr.c_str(), 
+              "apply", "--target", targetPath.c_str(),
+              "--pid", pidStr.c_str(),
+              "--caller", callerPath.c_str(),
+              (char*)nullptr);
+        
+        // If we get here, exec failed
+        std::cerr << "Failed to exec updater process: " << updaterPathStr << '\n';
+        _exit(1);
+    }
+    else if (pid < 0)
+    {
+        std::cerr << "Failed to fork updater process\n";
+        return false;
+    }
+    // Parent process continues
+#endif
     return true;
 }
 

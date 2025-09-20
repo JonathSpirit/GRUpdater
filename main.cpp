@@ -1,7 +1,8 @@
 #include "updater.hpp"
 #include "CLI11.hpp"
 #include <iostream>
-#include <bits/this_thread_sleep.h>
+#include <thread>
+#include <chrono>
 
 int main (int argc, char **argv)
 {
