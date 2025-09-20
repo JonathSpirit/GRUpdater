@@ -1,8 +1,8 @@
 #include <windows.h>
 
 VS_VERSION_INFO VERSIONINFO
- FILEVERSION     0,2,0,0
- PRODUCTVERSION  0,2,0,0
+ FILEVERSION     0,3,0,0
+ PRODUCTVERSION  0,3,0,0
  FILEFLAGSMASK   0x3fL
 #ifdef _DEBUG
  FILEFLAGS       VS_FF_DEBUG
@@ -19,12 +19,12 @@ BEGIN
         BEGIN
             VALUE "CompanyName",      "https://github.com/JonathSpirit/GRUpdater"
             VALUE "FileDescription",  "GRUpdater Command Line Tool"
-            VALUE "FileVersion",      "0.2.0.0"
+            VALUE "FileVersion",      "0.3.0.0"
             VALUE "InternalName",     "libGRUpdater.dll"
             VALUE "LegalCopyright",   "Copyright (c) 2025 Guillaume Guillet"
             VALUE "OriginalFilename", "libGRUpdater.dll"
             VALUE "ProductName",      "GRUpdater"
-            VALUE "ProductVersion",   "0.2.0.0"
+            VALUE "ProductVersion",   "0.3.0.0"
         END
     END
     BLOCK "VarFileInfo"
