@@ -701,11 +701,17 @@ bool ApplyUpdate(std::filesystem::path const &target, std::filesystem::path call
     }
 
     //Take all files from the extracted asset (root) and copy them to the target directory
+    //Ignore all *.zip file, TODO: we only want to ignore the downloaded zip file.
     std::filesystem::path currentPath = "./";
     std::filesystem::recursive_directory_iterator itAsset(currentPath);
     for (auto& file : itAsset)
     {
         if (!itAsset->is_regular_file())
+        {
+            continue;
+        }
+
+        if (file.path().extension().string() == ".zip")
         {
             continue;
         }
