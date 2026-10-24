@@ -6,6 +6,15 @@ GRUpdater is a C++ library and command-line tool for downloading and applying so
 
 It checks the latest release for a repository, compares version tags, downloads the matching archive, extracts it, and then replaces the installed application files with the new version.
 
+## Platform support
+
+GRUpdater supports both Windows and Linux.
+
+- Windows executable name: `GRUpdaterCmd.exe`
+- Linux executable name: `GRUpdaterCmd`
+
+When publishing releases, provide a `.zip` asset that includes the platform and architecture in its filename (for example `windows-x64` or `linux-x64`) so GRUpdater can select the correct artifact.
+
 ## Project files
 
 - `updater.hpp`: public API
@@ -21,6 +30,8 @@ Requirements:
 - CMake
 - OpenSSL
 - libzip
+
+Tested with MSVC on Windows and GCC/Clang on Linux.
 
 Example:
 

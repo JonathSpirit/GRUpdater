@@ -20,7 +20,7 @@
 #include "updater.hpp"
 #include "CLI11.hpp"
 #include <iostream>
-#include <bits/this_thread_sleep.h>
+#include <thread>
 
 int main (int argc, char **argv)
 {
@@ -271,4 +271,3 @@ int main (int argc, char **argv)
 
     CLI11_PARSE(app, argc, argv);
 }
-
