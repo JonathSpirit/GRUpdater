@@ -31,7 +31,7 @@ Requirements:
 - OpenSSL
 - libzip
 
-Tested with MSVC on Windows and GCC/Clang on Linux.
+Tested with MSYS2 UCRT64 GCC on Windows and GCC/Clang on Linux.
 
 Example:
 

@@ -140,28 +140,30 @@ bool WaitForProcessToExit(uint32_t pid)
 #endif
 }
 
-bool SpawnProcessDetached(std::filesystem::path const& executablePath, std::vector<std::string> const& args, std::filesystem::path const& workingDirectory)
+bool SpawnProcessDetached(std::filesystem::path const& executablePath,
+                          std::vector<std::string> const& args,
+                          std::filesystem::path const& workingDirectory)
 {
 #if defined(_WIN32)
     std::wstring commandLine;
-    for (size_t i = 0; i < args.size(); ++i)
+    for (std::size_t i = 0; i < args.size(); ++i)
     {
         if (i > 0)
         {
             commandLine += L' ';
         }
-        commandLine += L"\"";
+        commandLine += L'\"';
         commandLine += std::filesystem::path{args[i]}.wstring();
-        commandLine += L"\"";
+        commandLine += L'\"';
     }
 
     STARTUPINFOW startupInfo{};
     startupInfo.cb = sizeof(startupInfo);
     PROCESS_INFORMATION processInfo{};
     if (!CreateProcessW(executablePath.wstring().c_str(), commandLine.empty() ? nullptr : commandLine.data(),
-        nullptr, nullptr, FALSE,
-        CREATE_NEW_PROCESS_GROUP | DETACHED_PROCESS, nullptr,
-        workingDirectory.wstring().c_str(), &startupInfo, &processInfo))
+                        nullptr, nullptr, FALSE,
+                        CREATE_NEW_PROCESS_GROUP | DETACHED_PROCESS, nullptr,
+                        workingDirectory.wstring().c_str(), &startupInfo, &processInfo))
     {
         return false;
     }
@@ -202,7 +204,6 @@ bool SpawnProcessDetached(std::filesystem::path const& executablePath, std::vect
     return true;
 #endif
 }
-
 }
 
 const char* ToString(TagStatus status)
@@ -467,7 +468,7 @@ std::optional<std::filesystem::path> DownloadLocalAsset(RepoContext const& conte
     {
         assetPath = tempDir / std::filesystem::path{context._assetUrl}.filename();
     }
-    
+
     std::error_code err;
     std::filesystem::copy(context._assetUrl, assetPath, std::filesystem::copy_options::recursive, err);
     if (err)
