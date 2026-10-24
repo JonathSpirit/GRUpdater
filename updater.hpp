@@ -65,9 +65,11 @@ struct RepoContext
 
 [[nodiscard]] UPDATER_API std::optional<Tag> ParseTag(std::string const& tag);
 
+[[nodiscard]] UPDATER_API std::optional<RepoContext> RetrieveLocalContext(std::filesystem::path const& localPath, Tag const& localTag = GRUPDATER_NOTAG);
 [[nodiscard]] UPDATER_API std::optional<RepoContext> RetrieveContext(std::string const& owner, std::string const& repo, bool allowPrerelease = false);
 [[nodiscard]] UPDATER_API TagStatus VerifyTag(RepoContext const& context, Tag const& currentTag);
 
+[[nodiscard]] UPDATER_API std::optional<std::filesystem::path> DownloadLocalAsset(RepoContext const& context, std::filesystem::path const& tempDir);
 [[nodiscard]] UPDATER_API std::optional<std::filesystem::path> DownloadAsset(RepoContext const& context, std::filesystem::path const& tempDir);
 [[nodiscard]] UPDATER_API std::optional<std::filesystem::path> ExtractAsset(std::filesystem::path const& assetPath);
 

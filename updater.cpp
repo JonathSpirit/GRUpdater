@@ -79,6 +79,26 @@ std::optional<Tag> ParseTag(std::string const& tag)
     return std::nullopt;
 }
 
+std::optional<RepoContext> RetrieveLocalContext(std::filesystem::path const& localPath, Tag const& localTag)
+{
+    if (localPath.empty())
+    {
+        return std::nullopt;
+    }
+
+    if (!std::filesystem::exists(localPath))
+    {
+        return std::nullopt;
+    }
+
+    RepoContext context;
+    context._owner = "local";
+    context._repo = "local";
+    context._asset = !localPath.has_filename() ? "" : localPath.filename().string();
+    context._assetUrl = localPath.string();
+    context._latestTag = localTag;
+    return context;
+}
 std::optional<RepoContext> RetrieveContext(std::string const& owner, std::string const& repo, [[maybe_unused]] bool allowPrerelease)
 {
     using namespace httplib;
@@ -213,6 +233,87 @@ TagStatus VerifyTag(RepoContext const& context, Tag const& currentTag)
     return TagStatus::OlderTag;
 }
 
+std::optional<std::filesystem::path> DownloadLocalAsset(RepoContext const& context, std::filesystem::path const& tempDir)
+{
+    if (context._assetUrl.empty())
+    {
+        return std::nullopt;
+    }
+
+    if (tempDir.empty() || !tempDir.is_relative())
+    {
+        return std::nullopt;
+    }
+
+    //Check if tempDir is inside working directory
+    auto currentPath = std::filesystem::current_path();
+    auto fullPath = std::filesystem::absolute(tempDir);
+    auto relativePath = std::filesystem::relative(fullPath, currentPath) / "";
+
+    if (relativePath.lexically_normal() != tempDir.lexically_normal() || currentPath == fullPath)
+    {
+        return std::nullopt;
+    }
+
+    if (!std::filesystem::exists(tempDir))
+    {
+        if (!std::filesystem::create_directories(tempDir))
+        {
+            return std::nullopt;
+        }
+    }
+    else if (!std::filesystem::is_directory(tempDir))
+    {
+        return std::nullopt;
+    }
+
+    if (!std::filesystem::is_empty(tempDir))
+    {
+        std::filesystem::remove_all(tempDir);
+        if (!std::filesystem::create_directories(tempDir))
+        {
+            return std::nullopt;
+        }
+    }
+
+#ifdef _UPDATER_DEF_DUMMYTEST
+    std::filesystem::path assetPath = tempDir / context._asset;
+    std::ofstream file(assetPath, std::ios::binary);
+    file << "Dummy data";
+    file.close();
+    return assetPath;
+#else
+    if (!std::filesystem::exists(context._assetUrl))
+    {
+        return std::nullopt;
+    }
+
+    std::filesystem::path assetPath;
+
+    if (std::filesystem::is_directory(context._assetUrl))
+    {
+        assetPath = context._assetUrl;
+        // Remove trailing separator if present
+        if (assetPath.filename().empty())
+        {
+            assetPath = assetPath.parent_path();
+        }
+        assetPath = tempDir / assetPath.filename();
+    }
+    else
+    {
+        assetPath = tempDir / std::filesystem::path{context._assetUrl}.filename();
+    }
+    
+    std::error_code err;
+    std::filesystem::copy(context._assetUrl, assetPath, std::filesystem::copy_options::recursive, err);
+    if (err)
+    {
+        return std::nullopt;
+    }
+    return assetPath;
+#endif // _UPDATER_DEF_DUMMYTEST
+}
 std::optional<std::filesystem::path> DownloadAsset(RepoContext const& context, std::filesystem::path const& tempDir)
 {
 	using namespace httplib;
