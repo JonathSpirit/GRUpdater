@@ -21,7 +21,7 @@ BEGIN
             VALUE "FileDescription",  "GRUpdater Command Line Tool"
             VALUE "FileVersion",      "0.3.0.0"
             VALUE "InternalName",     "GRUpdaterCmd.exe"
-            VALUE "LegalCopyright",   "Copyright (c) 2025 Guillaume Guillet"
+            VALUE "LegalCopyright",   "Copyright (c) 2026 Guillaume Guillet"
             VALUE "OriginalFilename", "GRUpdaterCmd.exe"
             VALUE "ProductName",      "GRUpdater"
             VALUE "ProductVersion",   "0.3.0.0"

@@ -1,7 +1,7 @@
 # GRUpdater
 
 MIT License
-Copyright (c) 2024 Guilllaume Guillet
+Copyright (c) 2026 Guilllaume Guillet
 
 ## Description
 
