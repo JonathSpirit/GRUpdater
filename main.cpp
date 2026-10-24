@@ -17,15 +17,63 @@ int main (int argc, char **argv)
     std::string currentTagString;
     std::string owner;
     std::string repo;
+    std::filesystem::path localPath;
 
     auto subcommandFetch = app.add_subcommand("fetch", "Fetch the latest release from GitHub");
 
-    subcommandFetch->add_option("-c,--current", currentTagString, "The current version tag of the software")
-        ->required();
-    subcommandFetch->add_option("-o,--owner", owner, "The owner of the repository")
-        ->required();
-    subcommandFetch->add_option("-r,--repo", repo, "The repository name")
-        ->required();
+    // Group command for the version
+    auto fetchVersionOptions = subcommandFetch->add_option_group("Version options");
+
+    bool ignoreCurrentTag = false;
+
+    fetchVersionOptions->add_option(
+        "-c,--current",
+        currentTagString,
+        "The current version tag of the software"
+    );
+
+    fetchVersionOptions->add_flag(
+        "--noTag",
+        ignoreCurrentTag,
+        "Ignore the current version"
+    );
+
+    // Require exactly one option from the group
+    fetchVersionOptions->require_option(1);
+
+    // Create a group to select the source
+    auto fetchSourceOptions = subcommandFetch->add_option_group("Source options");
+
+    // GitHub owner
+    auto ownerOption = fetchSourceOptions->add_option(
+        "-o,--owner",
+        owner,
+        "The owner of the GitHub repository"
+    );
+
+    // GitHub repository
+    auto repoOption = subcommandFetch->add_option(
+        "-r,--repo",
+        repo,
+        "The GitHub repository name"
+    );
+
+    // Local path
+    auto localOption = fetchSourceOptions->add_option(
+        "--localPath",
+        localPath,
+        "Fetch from a local path instead of GitHub"
+    )->check(CLI::ExistingPath);
+
+    // Require exactly one source: owner OR localPath
+    fetchSourceOptions->require_option(1);
+
+    // GitHub requires both owner and repo
+    ownerOption->needs(repoOption);
+    repoOption->needs(ownerOption);
+
+    // Local mode cannot be mixed with GitHub mode
+    localOption->excludes(repoOption);
 
     std::filesystem::path tempDir = "./temp/";
     subcommandFetch->add_option("-t,--temp", tempDir, "The relative temporary directory to store the asset (default: ./temp/)");
@@ -34,14 +82,24 @@ int main (int argc, char **argv)
     bool downloadAsset = false;
     bool extractAsset = false;
     bool allowPrerelease = false;
+    bool ignoreSchedule = false;
 
     subcommandFetch->add_flag("--verify", verifyTag, "Verify the tag");
     subcommandFetch->add_flag("--download", downloadAsset, "Download the asset");
     subcommandFetch->add_flag("--extract", extractAsset, "Extract the asset");
     subcommandFetch->add_flag("--prerelease", allowPrerelease, "Allow prerelease tag");
+    subcommandFetch->add_flag("--ignoreSchedule", ignoreSchedule, "Ignore schedule time");
 
     subcommandFetch->callback([&] {
-        auto currentTag = ParseTag(currentTagString);
+        std::optional<updater::Tag> currentTag;
+        if (ignoreCurrentTag)
+        {
+            currentTag = GRUPDATER_NOTAG;
+        }
+        else
+        {
+            currentTag = ParseTag(currentTagString);
+        }
         if (!currentTag)
         {
             std::cerr << "Failed to parse current tag\n";
@@ -49,19 +107,32 @@ int main (int argc, char **argv)
         }
 
         //Verify schedule time in order to avoid spamming GitHub API requests
-        auto scheduleTime = GetScheduleTime();
-        if (scheduleTime && !VerifyScheduleTime(*scheduleTime))
+        if (!ignoreSchedule)
         {
-            std::cerr << "Schedule time not reached yet, remaining "
-                      << GRUPDATER_DEFAULT_SCHEDULE_DELAY_HOURS * 60 - std::chrono::duration_cast<std::chrono::minutes>(std::chrono::system_clock::now() - *scheduleTime).count() << " minutes\n";
-            throw CLI::RuntimeError{1};
-        }
-        if (!SetScheduleTime())
-        {
-            std::cerr << "Failed to set schedule time (will continue anyway)\n";
+            auto scheduleTime = GetScheduleTime();
+            if (scheduleTime && !VerifyScheduleTime(*scheduleTime))
+            {
+                std::cerr << "Schedule time not reached yet, remaining "
+                        << GRUPDATER_DEFAULT_SCHEDULE_DELAY_HOURS * 60 - std::chrono::duration_cast<std::chrono::minutes>(std::chrono::system_clock::now() - *scheduleTime).count() << " minutes\n";
+                throw CLI::RuntimeError{1};
+            }
+            if (!SetScheduleTime())
+            {
+                std::cerr << "Failed to set schedule time (will continue anyway)\n";
+            }
         }
 
-        auto context = RetrieveContext(owner, repo, allowPrerelease);
+        std::optional<updater::RepoContext> context;
+        
+        if (localPath.empty())
+        {
+            context = RetrieveContext(owner, repo, allowPrerelease);
+        }
+        else
+        {
+            context = RetrieveLocalContext(localPath, currentTag.value_or(GRUPDATER_NOTAG));
+        }
+
         if (!context)
         {
             std::cerr << "Failed to retrieve context\n";
@@ -74,7 +145,7 @@ int main (int argc, char **argv)
         std::cout << "\tAsset URL: " << context->_assetUrl << '\n';
         std::cout << "\tLatest Tag: " << context->_latestTag.major << '.' << context->_latestTag.minor << '.' << context->_latestTag.patch << '\n';
 
-        if (verifyTag)
+        if (verifyTag && !ignoreCurrentTag)
         {
             if (VerifyTag(*context, *currentTag) != TagStatus::NewerTag)
             {
@@ -85,7 +156,17 @@ int main (int argc, char **argv)
         }
 
         std::optional<std::filesystem::path> zipFile;
-        if (downloadAsset)
+        if (!localPath.empty())
+        {
+            zipFile = DownloadLocalAsset(*context, tempDir);
+            if (!zipFile)
+            {
+                std::cerr << "Failed to download local asset\n";
+                throw CLI::RuntimeError{1};
+            }
+            std::cout << "Local asset downloaded to " << *zipFile << '\n';
+        }
+        else if (downloadAsset)
         {
             zipFile = DownloadAsset(*context, tempDir);
             if (!zipFile)
@@ -93,14 +174,13 @@ int main (int argc, char **argv)
                 std::cerr << "Failed to download asset\n";
                 throw CLI::RuntimeError{1};
             }
+            std::cout << "Asset downloaded to " << *zipFile << '\n';
         }
         else
         {
             std::cerr << "Not implemented\n";
             throw CLI::RuntimeError{1};
         }
-
-        std::cout << "Asset downloaded to " << *zipFile << '\n';
 
         std::optional<std::filesystem::path> extractRoot;
         if (extractAsset)
@@ -111,14 +191,13 @@ int main (int argc, char **argv)
                 std::cerr << "Failed to extract asset\n";
                 throw CLI::RuntimeError{1};
             }
+            std::cout << "Asset extracted to " << *extractRoot << '\n';
         }
         else
         {
             std::cerr << "Not implemented\n";
             throw CLI::RuntimeError{1};
         }
-
-        std::cout << "Asset extracted to " << *extractRoot << '\n';
 
         throw CLI::Success{};
     });
