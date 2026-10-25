@@ -22,15 +22,29 @@
 #include "json.hpp"
 #include "updater.hpp"
 #include <zip.h>
+#include <array>
+#include <cctype>
+#include <cstring>
 #include <fstream>
+#include <iostream>
+#include <thread>
+#include <vector>
 
-#ifndef WIN32_LEAN_AND_MEAN
-    #define WIN32_LEAN_AND_MEAN
+#if defined(_WIN32)
+    #ifndef WIN32_LEAN_AND_MEAN
+        #define WIN32_LEAN_AND_MEAN
+    #endif
+    #ifndef NOMINMAX
+        #define NOMINMAX
+    #endif
+    #include <windows.h>
+#else
+    #include <csignal>
+    #include <cerrno>
+    #include <sys/types.h>
+    #include <sys/wait.h>
+    #include <unistd.h>
 #endif
-#ifndef NOMINMAX
-    #define NOMINMAX
-#endif
-#include <windows.h>
 
 namespace updater
 {
@@ -51,6 +65,145 @@ bool IsSubDirectory(std::filesystem::path p, std::filesystem::path const& root)
     return false;
 }
 
+std::string GetPlatformToken()
+{
+#if defined(_WIN32)
+    return "windows";
+#elif defined(__linux__)
+    return "linux";
+#else
+    return "";
+#endif
+}
+
+bool IsArchitectureMatch(std::string const& assetNameLower)
+{
+    if constexpr (sizeof(void*) == 8)
+    {
+        return assetNameLower.find("64") != std::string::npos
+            || assetNameLower.find("x64") != std::string::npos
+            || assetNameLower.find("amd64") != std::string::npos;
+    }
+    return assetNameLower.find("32") != std::string::npos
+        || assetNameLower.find("x86") != std::string::npos
+        || assetNameLower.find("i386") != std::string::npos;
+}
+
+bool IsZipContentType(std::string const& contentType)
+{
+    return contentType == "application/zip"
+        || contentType == "application/x-zip-compressed"
+        || contentType == "application/octet-stream";
+}
+
+bool WaitForProcessToExit(uint32_t pid)
+{
+#if defined(_WIN32)
+    HANDLE processHandle = OpenProcess(SYNCHRONIZE, FALSE, pid);
+    if (processHandle == nullptr)
+    {
+        std::cout << "Failed to open process " << pid << '\n';
+        return true;
+    }
+
+    std::cout << "Waiting for process " << pid << " to finish\n";
+    DWORD result = WaitForSingleObject(processHandle, GRUPDATER_WAIT_PID_TIMEOUT_MS);
+    CloseHandle(processHandle);
+    if (result != WAIT_OBJECT_0)
+    {
+        std::cerr << "Failed to wait for process " << pid << '\n';
+        return false;
+    }
+    return true;
+#else
+    std::cout << "Waiting for process " << pid << " to finish\n";
+    constexpr std::chrono::milliseconds pollInterval{100};
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds{GRUPDATER_WAIT_PID_TIMEOUT_MS};
+    while (std::chrono::steady_clock::now() < deadline)
+    {
+        if (kill(static_cast<pid_t>(pid), 0) == -1)
+        {
+            if (errno == ESRCH)
+            {
+                return true;
+            }
+            if (errno == EPERM)
+            {
+                return false;
+            }
+        }
+        std::this_thread::sleep_for(pollInterval);
+    }
+
+    std::cerr << "Failed to wait for process " << pid << '\n';
+    return false;
+#endif
+}
+
+bool SpawnProcessDetached(std::filesystem::path const& executablePath,
+                          std::vector<std::string> const& args,
+                          std::filesystem::path const& workingDirectory)
+{
+#if defined(_WIN32)
+    std::wstring commandLine;
+    for (std::size_t i = 0; i < args.size(); ++i)
+    {
+        if (i > 0)
+        {
+            commandLine += L' ';
+        }
+        commandLine += L'\"';
+        commandLine += std::filesystem::path{args[i]}.wstring();
+        commandLine += L'\"';
+    }
+
+    STARTUPINFOW startupInfo{};
+    startupInfo.cb = sizeof(startupInfo);
+    PROCESS_INFORMATION processInfo{};
+    if (!CreateProcessW(executablePath.wstring().c_str(), commandLine.empty() ? nullptr : commandLine.data(),
+                        nullptr, nullptr, FALSE,
+                        CREATE_NEW_PROCESS_GROUP | DETACHED_PROCESS, nullptr,
+                        workingDirectory.wstring().c_str(), &startupInfo, &processInfo))
+    {
+        return false;
+    }
+    CloseHandle(processInfo.hProcess);
+    CloseHandle(processInfo.hThread);
+    return true;
+#else
+    pid_t pid = fork();
+    if (pid < 0)
+    {
+        return false;
+    }
+    if (pid == 0)
+    {
+        if (setsid() < 0)
+        {
+            _exit(127);
+        }
+        if (chdir(workingDirectory.c_str()) != 0)
+        {
+            _exit(127);
+        }
+
+        std::vector<char*> argv;
+        argv.reserve(args.size() + 2);
+        argv.push_back(const_cast<char*>(executablePath.c_str()));
+        for (auto const& arg : args)
+        {
+            argv.push_back(const_cast<char*>(arg.c_str()));
+        }
+        argv.push_back(nullptr);
+        execv(executablePath.c_str(), argv.data());
+        _exit(127);
+    }
+
+    int status = 0;
+    waitpid(pid, &status, WNOHANG);
+    return true;
+#endif
+}
 }
 
 const char* ToString(TagStatus status)
@@ -172,44 +325,36 @@ std::optional<RepoContext> RetrieveContext(std::string const& owner, std::string
         }
 
 		auto assets = json[0]["assets"];
-        if (assets.empty() && !assets.is_array())
+        if (!assets.is_array() || assets.empty())
         {
             return std::nullopt;
         }
 
+        auto platformToken = GetPlatformToken();
         for (auto const& asset : assets)
         {
             std::string asset_name = asset["name"];
             std::string asset_name_lower = asset_name;
-            std::ranges::transform(asset_name_lower, asset_name_lower.begin(), ::tolower);
+            std::ranges::transform(asset_name_lower, asset_name_lower.begin(), [](unsigned char c){ return static_cast<char>(std::tolower(c)); });
 
-            if (asset_name_lower.find("windows") == std::string::npos)
+            if (!platformToken.empty() && asset_name_lower.find(platformToken) == std::string::npos)
             {
                 continue;
             }
 
-            if constexpr (sizeof(void*) == 8)
+            if (!IsArchitectureMatch(asset_name_lower))
             {
-                if (asset_name_lower.find("64") == std::string::npos)
-                {
-                    continue;
-                }
-            }
-            else
-            {
-                if (asset_name_lower.find("32") == std::string::npos)
-                {
-                    continue;
-                }
+                continue;
             }
 
             std::string content_type = asset["content_type"];
-            if (content_type != "application/x-zip-compressed")
+            std::string asset_url = asset["browser_download_url"];
+
+            bool validZipExtension = asset_name_lower.size() >= 4 && asset_name_lower.rfind(".zip") == asset_name_lower.size() - 4;
+            if (!IsZipContentType(content_type) && !validZipExtension)
             {
                 continue;
             }
-
-            std::string asset_url = asset["browser_download_url"];
 
             RepoContext context;
             context._owner = owner;
@@ -323,7 +468,7 @@ std::optional<std::filesystem::path> DownloadLocalAsset(RepoContext const& conte
     {
         assetPath = tempDir / std::filesystem::path{context._assetUrl}.filename();
     }
-    
+
     std::error_code err;
     std::filesystem::copy(context._assetUrl, assetPath, std::filesystem::copy_options::recursive, err);
     if (err)
@@ -611,23 +756,9 @@ bool ApplyUpdate(std::filesystem::path const &target, std::filesystem::path call
     //Wait for the caller to close
     if (callerPid)
     {
-        //Get handle
-        HANDLE hProcess = OpenProcess(SYNCHRONIZE, FALSE, *callerPid);
-        if (hProcess != nullptr)
+        if (!WaitForProcessToExit(*callerPid))
         {
-            //Wait for the process to finish
-            std::cout << "Waiting for process " << *callerPid << " to finish\n";
-            DWORD ret = WaitForSingleObject(hProcess, GRUPDATER_WAIT_PID_TIMEOUT_MS);
-            CloseHandle(hProcess);
-            if (ret != WAIT_OBJECT_0)
-            {
-                std::cerr << "Failed to wait for process " << *callerPid << '\n';
-                return false;
-            }
-        }
-        else
-        {
-            std::cout << "Failed to open process " << *callerPid << '\n';
+            return false;
         }
     }
 
@@ -747,21 +878,11 @@ bool ApplyUpdate(std::filesystem::path const &target, std::filesystem::path call
         std::this_thread::sleep_for(std::chrono::seconds{2});
 
         std::cout << "Caller executable: " << callerExecutable << '\n';
-        //Launch the caller executable
-        std::wstring callerExecutableW = callerExecutable.wstring();
-        STARTUPINFOW si{};
-        si.cb = sizeof(si);
-        PROCESS_INFORMATION pi{};
-        if (!CreateProcessW(callerExecutableW.c_str(), nullptr,
-            nullptr, nullptr, FALSE,
-            CREATE_NEW_PROCESS_GROUP | DETACHED_PROCESS, nullptr,
-            callerExecutable.parent_path().wstring().c_str(), &si, &pi))
+        if (!SpawnProcessDetached(callerExecutable, {}, callerExecutable.parent_path()))
         {
-            std::cerr << "Failed to create process\n";
+            std::cerr << "Failed to relaunch caller executable\n";
             return true; //Return true because the update was successful
         }
-        CloseHandle(pi.hProcess);
-        CloseHandle(pi.hThread);
     }
 
     return true;
@@ -783,32 +904,26 @@ bool RequestApplyUpdate(std::filesystem::path const &rootAssetPath, std::filesys
         return false;
     }
 
-    //Get the caller process id
-    auto callerPid = GetCurrentProcessId();
+    uint32_t callerPid = 0;
+#if defined(_WIN32)
+    callerPid = GetCurrentProcessId();
+#else
+    callerPid = static_cast<uint32_t>(getpid());
+#endif
 
-    //Launch the updater executable
-    std::wstring updaterPathW = updaterPath.wstring();
-    std::wstring commandLine = GRUPDATER_EXECUTABLE_NAME_W L" apply --target \""
-            + std::filesystem::current_path().wstring()
-            + L"\" --pid " + std::to_wstring(callerPid)
-            + L" --caller \"" + callerExecutable.wstring() + L'\"';
+    std::vector<std::string> args = {
+        "apply",
+        "--target", std::filesystem::current_path().string(),
+        "--pid", std::to_string(callerPid),
+        "--caller", callerExecutable.string()
+    };
 
-    std::wcout << "Command line: " << commandLine << '\n';
-    std::wcout << "Updater path: " << updaterPathW << '\n';
-
-    STARTUPINFOW si{};
-    si.cb = sizeof(si);
-    PROCESS_INFORMATION pi{};
-    if (!CreateProcessW(updaterPathW.c_str(), commandLine.data(),
-        nullptr, nullptr, FALSE,
-        CREATE_NEW_PROCESS_GROUP | CREATE_NEW_CONSOLE, nullptr,
-        rootAssetPath.wstring().c_str(), &si, &pi))
+    std::cout << "Updater path: " << updaterPath << '\n';
+    if (!SpawnProcessDetached(updaterPath, args, rootAssetPath))
     {
         std::cerr << "Failed to create process\n";
         return false;
     }
-    CloseHandle(pi.hProcess);
-    CloseHandle(pi.hThread);
     return true;
 }
 
