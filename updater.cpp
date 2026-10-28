@@ -22,11 +22,17 @@
 #include "json.hpp"
 #include "updater.hpp"
 #include <zip.h>
+#include <openssl/evp.h>
+#include <algorithm>
 #include <array>
 #include <cctype>
 #include <cstring>
 #include <fstream>
 #include <iostream>
+#include <iterator>
+#include <memory>
+#include <sstream>
+#include <string_view>
 #include <thread>
 #include <vector>
 
@@ -94,6 +100,120 @@ bool IsZipContentType(std::string const& contentType)
     return contentType == "application/zip"
         || contentType == "application/x-zip-compressed"
         || contentType == "application/octet-stream";
+}
+
+std::string ToLower(std::string str)
+{
+    std::ranges::transform(str, str.begin(), [](unsigned char c){ return static_cast<char>(std::tolower(c)); });
+    return str;
+}
+
+bool IsSha256Hex(std::string const& str)
+{
+    return str.size() == 64 && std::ranges::all_of(str, [](unsigned char c){ return std::isxdigit(c) != 0; });
+}
+
+//Parse a "sha256sum" like content, one entry per line: "<hash>", "<hash>  <name>" or "<hash> *<name>"
+//An entry without name is only used if no entry match the asset name
+std::optional<std::string> ParseChecksumFile(std::string const& content, std::string const& assetName)
+{
+    std::optional<std::string> unnamedHash;
+
+    std::istringstream stream(content);
+    std::string line;
+    while (std::getline(stream, line))
+    {
+        std::istringstream lineStream(line);
+        std::string hash;
+        if (!(lineStream >> hash))
+        {
+            continue;
+        }
+        hash = ToLower(std::move(hash));
+        if (!IsSha256Hex(hash))
+        {
+            continue;
+        }
+
+        std::string name;
+        std::getline(lineStream >> std::ws, name);
+        while (!name.empty() && std::isspace(static_cast<unsigned char>(name.back())))
+        {
+            name.pop_back();
+        }
+        if (!name.empty() && name.front() == '*')
+        {//Binary mode marker
+            name.erase(0, 1);
+        }
+
+        if (name.empty())
+        {
+            if (!unnamedHash)
+            {
+                unnamedHash = std::move(hash);
+            }
+            continue;
+        }
+
+        if (std::filesystem::path{name}.filename().string() == assetName)
+        {
+            return hash;
+        }
+    }
+    return unnamedHash;
+}
+
+//GitHub provide a "digest" field for each asset, formatted as "sha256:<hash>" (can be null for older assets)
+std::optional<std::string> ParseAssetDigest(nlohmann::json const& asset)
+{
+    if (!asset.contains("digest") || !asset["digest"].is_string())
+    {
+        return std::nullopt;
+    }
+
+    constexpr std::string_view prefix = "sha256:";
+    auto digest = ToLower(asset["digest"].get<std::string>());
+    if (!digest.starts_with(prefix))
+    {
+        return std::nullopt;
+    }
+    digest.erase(0, prefix.size());
+    if (!IsSha256Hex(digest))
+    {
+        return std::nullopt;
+    }
+    return digest;
+}
+
+//Look for a "<asset>.sha256" file in the release assets and download it
+std::optional<std::string> FetchRemoteChecksumFile(nlohmann::json const& assets, std::string const& assetName)
+{
+    using namespace httplib;
+
+    auto const checksumAssetName = assetName + GRUPDATER_CHECKSUM_FILE_EXTENSION;
+    for (auto const& asset : assets)
+    {
+        if (!asset.contains("name") || !asset["name"].is_string() || asset["name"].get<std::string>() != checksumAssetName)
+        {
+            continue;
+        }
+        if (!asset.contains("browser_download_url") || !asset["browser_download_url"].is_string())
+        {
+            return std::nullopt;
+        }
+
+        Client cli("https://github.com");
+        cli.set_follow_location(true);
+
+        auto res = cli.Get(asset["browser_download_url"].get<std::string>());
+        if (!res || res->status != StatusCode::OK_200)
+        {
+            std::cerr << "Failed to download checksum file " << checksumAssetName << '\n';
+            return std::nullopt;
+        }
+        return ParseChecksumFile(res->body, assetName);
+    }
+    return std::nullopt;
 }
 
 bool WaitForProcessToExit(uint32_t pid)
@@ -236,6 +356,20 @@ std::optional<TagStatus> FromString(std::string const& status)
     }
     return std::nullopt;
 }
+const char* ToString(ChecksumStatus status)
+{
+    switch (status)
+    {
+    case ChecksumStatus::Valid:
+        return "Valid";
+    case ChecksumStatus::Invalid:
+        return "Invalid";
+    case ChecksumStatus::Unavailable:
+        return "Unavailable";
+    default:
+        return "Unknown";
+    }
+}
 
 std::optional<Tag> ParseTag(std::string const& tag)
 {
@@ -269,6 +403,27 @@ std::optional<RepoContext> RetrieveLocalContext(std::filesystem::path const& loc
     context._asset = !localPath.has_filename() ? "" : localPath.filename().string();
     context._assetUrl = localPath.string();
     context._latestTag = localTag;
+
+    //Look for a "<asset>.sha256" file next to the local asset
+    if (std::filesystem::is_regular_file(localPath))
+    {
+        auto checksumPath = localPath;
+        checksumPath += GRUPDATER_CHECKSUM_FILE_EXTENSION;
+
+        std::ifstream checksumFile(checksumPath, std::ios::binary);
+        if (checksumFile.is_open())
+        {
+            std::string const content{std::istreambuf_iterator<char>{checksumFile}, std::istreambuf_iterator<char>{}};
+            if (auto checksum = ParseChecksumFile(content, context._asset))
+            {
+                context._assetSha256 = std::move(*checksum);
+            }
+            else
+            {
+                std::cerr << "No valid checksum found in " << checksumPath << " (ignored)\n";
+            }
+        }
+    }
     return context;
 }
 std::optional<RepoContext> RetrieveContext(std::string const& owner, std::string const& repo, [[maybe_unused]] bool allowPrerelease)
@@ -334,8 +489,7 @@ std::optional<RepoContext> RetrieveContext(std::string const& owner, std::string
         for (auto const& asset : assets)
         {
             std::string asset_name = asset["name"];
-            std::string asset_name_lower = asset_name;
-            std::ranges::transform(asset_name_lower, asset_name_lower.begin(), [](unsigned char c){ return static_cast<char>(std::tolower(c)); });
+            std::string asset_name_lower = ToLower(asset_name);
 
             if (!platformToken.empty() && asset_name_lower.find(platformToken) == std::string::npos)
             {
@@ -362,6 +516,15 @@ std::optional<RepoContext> RetrieveContext(std::string const& owner, std::string
             context._asset = std::move(asset_name);
             context._assetUrl = std::move(asset_url);
             context._latestTag = tag.value();
+
+            if (auto digest = ParseAssetDigest(asset))
+            {
+                context._assetSha256 = std::move(*digest);
+            }
+            else if (auto checksum = FetchRemoteChecksumFile(assets, context._asset))
+            {
+                context._assetSha256 = std::move(*checksum);
+            }
             return context;
         }
     }
@@ -549,6 +712,90 @@ std::optional<std::filesystem::path> DownloadAsset(RepoContext const& context, s
     return std::nullopt;
 #endif // _UPDATER_DEF_DUMMYTEST
 }
+
+std::optional<std::string> ComputeSha256(std::filesystem::path const& filePath)
+{
+    std::ifstream file(filePath, std::ios::binary);
+    if (!file.is_open())
+    {
+        return std::nullopt;
+    }
+
+    std::unique_ptr<EVP_MD_CTX, decltype(&EVP_MD_CTX_free)> ctx(EVP_MD_CTX_new(), &EVP_MD_CTX_free);
+    if (!ctx || EVP_DigestInit_ex(ctx.get(), EVP_sha256(), nullptr) != 1)
+    {
+        return std::nullopt;
+    }
+
+    std::vector<char> buffer(64 * 1024);
+    while (file)
+    {
+        file.read(buffer.data(), static_cast<std::streamsize>(buffer.size()));
+        auto const dataSize = file.gcount();
+        if (dataSize > 0 && EVP_DigestUpdate(ctx.get(), buffer.data(), static_cast<std::size_t>(dataSize)) != 1)
+        {
+            return std::nullopt;
+        }
+    }
+    if (file.bad())
+    {
+        return std::nullopt;
+    }
+
+    std::array<unsigned char, EVP_MAX_MD_SIZE> digest{};
+    unsigned int digestSize = 0;
+    if (EVP_DigestFinal_ex(ctx.get(), digest.data(), &digestSize) != 1)
+    {
+        return std::nullopt;
+    }
+
+    constexpr char hexChars[] = "0123456789abcdef";
+    std::string result;
+    result.reserve(digestSize * 2);
+    for (unsigned int i = 0; i < digestSize; ++i)
+    {
+        result += hexChars[digest[i] >> 4];
+        result += hexChars[digest[i] & 0x0F];
+    }
+    return result;
+}
+ChecksumStatus VerifyChecksum(RepoContext const& context, std::filesystem::path const& assetPath)
+{
+    if (context._assetSha256.empty())
+    {
+        return ChecksumStatus::Unavailable;
+    }
+
+    auto const expected = ToLower(context._assetSha256);
+    if (!IsSha256Hex(expected))
+    {
+        std::cerr << "Malformed expected checksum: " << context._assetSha256 << '\n';
+        return ChecksumStatus::Invalid;
+    }
+
+    if (!std::filesystem::is_regular_file(assetPath))
+    {
+        std::cerr << "Can't compute checksum of " << assetPath << ": not a regular file\n";
+        return ChecksumStatus::Invalid;
+    }
+
+    auto const actual = ComputeSha256(assetPath);
+    if (!actual)
+    {
+        std::cerr << "Failed to compute checksum of " << assetPath << '\n';
+        return ChecksumStatus::Invalid;
+    }
+
+    if (*actual != expected)
+    {
+        std::cerr << "Checksum mismatch for " << assetPath << '\n';
+        std::cerr << "\tExpected: " << expected << '\n';
+        std::cerr << "\tActual:   " << *actual << '\n';
+        return ChecksumStatus::Invalid;
+    }
+    return ChecksumStatus::Valid;
+}
+
 std::optional<std::filesystem::path> ExtractAsset(std::filesystem::path const& assetPath)
 {
     if (!std::filesystem::exists(assetPath) || !std::filesystem::is_regular_file(assetPath))
@@ -931,7 +1178,8 @@ std::optional<std::filesystem::path> MakeAvailable(Tag const& currentTag,
                                                    std::string const& owner,
                                                    std::string const& repo,
                                                    std::filesystem::path const& tempDir,
-                                                   bool allowPrerelease)
+                                                   bool allowPrerelease,
+                                                   bool requireChecksum)
 {
     //Verify schedule time in order to avoid spamming GitHub API requests
     auto scheduleTime = GetScheduleTime();
@@ -957,6 +1205,7 @@ std::optional<std::filesystem::path> MakeAvailable(Tag const& currentTag,
     std::cout << "\tAsset: " << context->_asset << '\n';
     std::cout << "\tAsset URL: " << context->_assetUrl << '\n';
     std::cout << "\tLatest Tag: " << context->_latestTag.major << '.' << context->_latestTag.minor << '.' << context->_latestTag.patch << '\n';
+    std::cout << "\tAsset SHA-256: " << (context->_assetSha256.empty() ? "<unavailable>" : context->_assetSha256) << '\n';
 
     if (VerifyTag(*context, currentTag) != TagStatus::NewerTag)
     {
@@ -973,6 +1222,32 @@ std::optional<std::filesystem::path> MakeAvailable(Tag const& currentTag,
     }
 
     std::cout << "Asset downloaded to " << *zipFile << '\n';
+
+    switch (VerifyChecksum(*context, *zipFile))
+    {
+    case ChecksumStatus::Valid:
+        std::cout << "Checksum verified\n";
+        break;
+    case ChecksumStatus::Invalid:
+    {
+        std::cerr << "Invalid checksum, the downloaded asset is corrupted or has been tampered with\n";
+        std::cerr << "File will be removed\n";
+        std::error_code err;
+        std::filesystem::remove(*zipFile, err);
+        return std::nullopt;
+    }
+    case ChecksumStatus::Unavailable:
+        if (requireChecksum)
+        {
+            std::cerr << "No checksum available for the asset\n";
+            std::cerr << "File will be removed\n";
+            std::error_code err;
+            std::filesystem::remove(*zipFile, err);
+            return std::nullopt;
+        }
+        std::cerr << "No checksum available for the asset, skipping verification\n";
+        break;
+    }
 
     auto extractRoot = ExtractAsset(*zipFile);
     if (!extractRoot)

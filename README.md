@@ -166,9 +166,10 @@ This version does the same job without dependencies: it checks for an update, as
 2. It filters the available release assets and selects the archive matching the current platform and architecture.
 3. It parses the release tag and compares it with the local application version.
 4. If the remote tag is newer, it downloads the archive into a temporary folder.
-5. It extracts the archive and identifies the root folder of the update.
-6. It starts the updater flow from the extracted files.
-7. The updater waits for the current process to exit, removes obsolete files, copies the new files, and tries to relaunch the application.
+5. It verifies the SHA-256 checksum of the downloaded archive.
+6. It extracts the archive and identifies the root folder of the update.
+7. It starts the updater flow from the extracted files.
+8. The updater waits for the current process to exit, removes obsolete files, copies the new files, and tries to relaunch the application.
 
 ## Update flow
 
@@ -190,8 +191,22 @@ The updater compares the remote version with the current local version.
 
 Only a newer release is considered valid for installation.
 
-### 3. Download and extract
-The archive is saved in a temporary directory and then extracted.
+### 3. Download, verify and extract
+The archive is saved in a temporary directory, its checksum is verified and then it is extracted.
+
+The expected SHA-256 checksum is retrieved, in this order, from:
+- the `digest` field that GitHub computes for every release asset (`sha256:<hash>`, may be missing on older assets)
+- a `<asset>.sha256` file published in the same release (for example `MyApp-windows-x64.zip.sha256`)
+
+In local mode, the `<asset>.sha256` file is looked up next to the local archive.
+
+The `.sha256` file uses the `sha256sum` format, so it can be generated with:
+
+```bash
+sha256sum MyApp-windows-x64.zip > MyApp-windows-x64.zip.sha256
+```
+
+A checksum mismatch always aborts the update. When no checksum is available, the verification is skipped with a warning, unless it is required (`requireChecksum` argument of `updater::MakeAvailable()` or `--requireChecksum` CLI flag).
 
 The extraction step detects whether the archive contains a root folder or whether files are placed directly in the extracted directory.
 
@@ -223,6 +238,7 @@ GRUpdaterCmd fetch \
   --verify \
   --download \
   --extract \
+  --requireChecksum \
   -t ./temp/
 ```
 

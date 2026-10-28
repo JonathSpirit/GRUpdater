@@ -63,6 +63,8 @@
 
 #define GRUPDATER_DEFAULT_DYNAMIC_FILE "./dynamicFiles.json"
 
+#define GRUPDATER_CHECKSUM_FILE_EXTENSION ".sha256"
+
 namespace updater
 {
 
@@ -80,13 +82,21 @@ enum class TagStatus
 };
 const char* ToString(TagStatus status);
 std::optional<TagStatus> FromString(std::string const& status);
+enum class ChecksumStatus
+{
+    Valid,
+    Invalid,
+    Unavailable
+};
+UPDATER_API const char* ToString(ChecksumStatus status);
 struct RepoContext
 {
-    std::string _owner;
-    std::string _repo;
-    std::string _asset;
-    std::string _assetUrl;
-    Tag _latestTag;
+    std::string _owner; //Owner of the repository
+    std::string _repo; //Name of the repository
+    std::string _asset; //Name of the asset (the file to download)
+    std::string _assetUrl; //URL of the asset (the file to download)
+    std::string _assetSha256; //Expected SHA-256 of the asset (lowercase hex), empty if unknown
+    Tag _latestTag; //Latest tag of the repository
 };
 
 [[nodiscard]] UPDATER_API std::optional<Tag> ParseTag(std::string const& tag);
@@ -97,6 +107,14 @@ struct RepoContext
 
 [[nodiscard]] UPDATER_API std::optional<std::filesystem::path> DownloadLocalAsset(RepoContext const& context, std::filesystem::path const& tempDir);
 [[nodiscard]] UPDATER_API std::optional<std::filesystem::path> DownloadAsset(RepoContext const& context, std::filesystem::path const& tempDir);
+[[nodiscard]] UPDATER_API std::optional<std::string> ComputeSha256(std::filesystem::path const& filePath);
+/*
+ * VerifyChecksum:
+ * Compare the SHA-256 of the downloaded asset with the one stored in the context.
+ * The expected checksum come from the GitHub asset "digest" field or from a "<asset>.sha256" file.
+ * Return Unavailable if the context does not have any expected checksum.
+ */
+[[nodiscard]] UPDATER_API ChecksumStatus VerifyChecksum(RepoContext const& context, std::filesystem::path const& assetPath);
 [[nodiscard]] UPDATER_API std::optional<std::filesystem::path> ExtractAsset(std::filesystem::path const& assetPath);
 
 [[nodiscard]] UPDATER_API std::optional<std::chrono::system_clock::time_point> GetScheduleTime(std::filesystem::path const& scheduleFile = GRUPDATER_DEFAULT_SCHEDULE_FILE);
@@ -117,6 +135,7 @@ struct RepoContext
  * - Retrieve the context
  * - Verify the tag
  * - Download the asset
+ * - Verify the asset checksum (a mismatch always fail, a missing checksum fail only if requireChecksum is true)
  * - Extract the asset
  * - Return the extracted root
  */
@@ -124,6 +143,7 @@ struct RepoContext
                                                                              std::string const& owner,
                                                                              std::string const& repo,
                                                                              std::filesystem::path const& tempDir,
-                                                                             bool allowPrerelease = false);
+                                                                             bool allowPrerelease = false,
+                                                                             bool requireChecksum = false);
 
 }//namespace updater

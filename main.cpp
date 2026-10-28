@@ -102,12 +102,14 @@ int main (int argc, char **argv)
     bool extractAsset = false;
     bool allowPrerelease = false;
     bool ignoreSchedule = false;
+    bool requireChecksum = false;
 
     subcommandFetch->add_flag("--verify", verifyTag, "Verify the tag");
     subcommandFetch->add_flag("--download", downloadAsset, "Download the asset");
     subcommandFetch->add_flag("--extract", extractAsset, "Extract the asset");
     subcommandFetch->add_flag("--prerelease", allowPrerelease, "Allow prerelease tag");
     subcommandFetch->add_flag("--ignoreSchedule", ignoreSchedule, "Ignore schedule time");
+    subcommandFetch->add_flag("--requireChecksum", requireChecksum, "Fail if no checksum is available for the asset");
 
     subcommandFetch->callback([&] {
         std::optional<updater::Tag> currentTag;
@@ -163,6 +165,7 @@ int main (int argc, char **argv)
         std::cout << "\tAsset: " << context->_asset << '\n';
         std::cout << "\tAsset URL: " << context->_assetUrl << '\n';
         std::cout << "\tLatest Tag: " << context->_latestTag.major << '.' << context->_latestTag.minor << '.' << context->_latestTag.patch << '\n';
+        std::cout << "\tAsset SHA-256: " << (context->_assetSha256.empty() ? "<unavailable>" : context->_assetSha256) << '\n';
 
         if (verifyTag && !ignoreCurrentTag)
         {
@@ -199,6 +202,26 @@ int main (int argc, char **argv)
         {
             std::cerr << "Not implemented\n";
             throw CLI::RuntimeError{1};
+        }
+
+        auto const checksumStatus = VerifyChecksum(*context, *zipFile);
+        if (checksumStatus == ChecksumStatus::Invalid)
+        {
+            std::cerr << "Invalid checksum, the downloaded asset is corrupted or has been tampered with\n";
+            throw CLI::RuntimeError{1};
+        }
+        if (checksumStatus == ChecksumStatus::Unavailable)
+        {
+            if (requireChecksum)
+            {
+                std::cerr << "No checksum available for the asset\n";
+                throw CLI::RuntimeError{1};
+            }
+            std::cerr << "No checksum available for the asset, skipping verification\n";
+        }
+        else
+        {
+            std::cout << "Checksum verified\n";
         }
 
         std::optional<std::filesystem::path> extractRoot;
